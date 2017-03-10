@@ -1621,7 +1621,7 @@ contains
           write(errunit,*) 'Starting to initialize data_override at '&
                            //trim(walldate)//' '//trim(walltime)
         endif
-        call data_override_init(Ocean_domain_in = Ocean%domain )
+        call data_override_init(Ocean_domain_in = Ocean%domain_untransformed )
         if( mpp_pe().EQ.mpp_root_pe() ) then
           call DATE_AND_TIME(walldate, walltime, wallzone, wallvalues)
           write(errunit,*) 'Finished initializing data_override at '&
