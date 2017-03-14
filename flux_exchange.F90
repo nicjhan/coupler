@@ -572,6 +572,7 @@ module flux_exchange_mod
   use land_model_mod,             only: Lnd_stock_pe
   use ocean_model_mod,            only: Ocean_stock_pe
   use atmos_model_mod,            only: Atm_stock_pe
+  use MOM_transform_test,         only: do_transform_on_this_pe, transform, undo_transform
 
 #ifdef SCM
 ! option to override various surface boundary conditions for SCM
@@ -1128,18 +1129,30 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
  
         call xgrid_init(remap_method)
 
-        call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /),   &
-             (/ Atm%Domain, Ice%Domain, Land%Domain /),        &
+        if (do_transform_on_this_pe()) then
+         call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /),   &
+             (/ Atm%Domain, Ice%Domain_untrans, Land%Domain /), &
              "INPUT/grid_spec.nc", Atm%grid)
+        else
+          call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /),   &
+             (/ Atm%Domain, Ice%Domain, Land%Domain /),  &
+             "INPUT/grid_spec.nc", Atm%grid)
+        endif
         ! exchange grid indices
         X1_GRID_ATM = 1; X1_GRID_ICE = 2; X1_GRID_LND = 3;
         call generate_sfc_xgrid( Land, Ice )
         if (n_xgrid_sfc.eq.1) write (*,'(a,i6,6x,a)') 'PE = ', mpp_pe(), 'Surface exchange size equals one.'
 
         if (do_runoff) then
-           call setup_xmap(xmap_runoff, (/ 'LND', 'OCN' /),       &
+          if (do_transform_on_this_pe()) then
+            call setup_xmap(xmap_runoff, (/ 'LND', 'OCN' /),       &
+                (/ Land%Domain, Ice%Domain_untrans /),             &
+                "INPUT/grid_spec.nc"             )
+          else
+            call setup_xmap(xmap_runoff, (/ 'LND', 'OCN' /),       &
                 (/ Land%Domain, Ice%Domain /),                    &
                 "INPUT/grid_spec.nc"             )
+          endif
            ! exchange grid indices
            X2_GRID_LND = 1; X2_GRID_ICE = 2;
            n_xgrid_runoff = max(xgrid_count(xmap_runoff),1)
@@ -1172,7 +1185,11 @@ subroutine flux_exchange_init ( Time, Atm, Land, Ice, Ocean, Ocean_state,&
 !Balaji
         
 !allocate atmos_ice_boundary
-        call mpp_get_compute_domain( Ice%domain, is, ie, js, je )
+        if (do_transform_on_this_pe()) then
+          call mpp_get_compute_domain( Ice%domain_untrans, is, ie, js, je )
+        else
+          call mpp_get_compute_domain( Ice%domain, is, ie, js, je )
+        endif
         kd = size(Ice%part_size,3)
         allocate( atmos_ice_boundary%u_flux(is:ie,js:je,kd) )
         allocate( atmos_ice_boundary%v_flux(is:ie,js:je,kd) )
@@ -3060,6 +3077,7 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   call data_override('ICE', 'q_flux', Ice_boundary%q_flux,  Time)
   call data_override('ICE', 'lw_flux',Ice_boundary%lw_flux, Time)
   call data_override('ICE', 'lw_flux_dn',Ice_boundary%lw_flux, Time, override=ov)
+  ov = .false.
   if (ov) then
     Ice_boundary%lw_flux = Ice_boundary%lw_flux - stefan*Ice%t_surf**4
   endif
@@ -3068,18 +3086,22 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   call data_override('ICE', 'sw_flux_nir_dif',Ice_boundary%sw_flux_nir_dif, Time, override=ov)
   call data_override('ICE', 'sw_flux_vis_dif',Ice_boundary%sw_flux_vis_dif, Time)
   call data_override('ICE', 'sw_flux_vis_dir_dn',Ice_boundary%sw_flux_vis_dir, Time, override=ov)
+  ov = .false.
   if (ov) then
     Ice_boundary%sw_flux_vis_dir = Ice_boundary%sw_flux_vis_dir*(1.0-Ice%albedo_vis_dir)
   endif
   call data_override('ICE', 'sw_flux_vis_dif_dn',Ice_boundary%sw_flux_vis_dif, Time, override=ov)
+  ov = .false.
   if (ov) then
     Ice_boundary%sw_flux_vis_dif = Ice_boundary%sw_flux_vis_dif*(1.0-Ice%albedo_vis_dif)
   endif
   call data_override('ICE', 'sw_flux_nir_dir_dn',Ice_boundary%sw_flux_nir_dir, Time, override=ov)
+  ov = .false.
   if (ov) then
     Ice_boundary%sw_flux_nir_dir = Ice_boundary%sw_flux_nir_dir*(1.0-Ice%albedo_nir_dir)
   endif
   call data_override('ICE', 'sw_flux_nir_dif_dn',Ice_boundary%sw_flux_nir_dif, Time, override=ov)
+  ov = .false.
   if (ov) then
     Ice_boundary%sw_flux_nir_dif = Ice_boundary%sw_flux_nir_dif*(1.0-Ice%albedo_nir_dif)
   endif
@@ -3701,15 +3723,25 @@ subroutine generate_sfc_xgrid( Land, Ice )
     type(land_data_type), intent(in) :: Land !< A derived data type to specify land boundary data
     type(ice_data_type),  intent(in) :: Ice !< A derived data type to specify ice boundary data
 
+    real, dimension(:, :, :), allocatable :: tmp
     integer :: isc, iec, jsc, jec
 
 !Balaji
   call mpp_clock_begin(cplClock)
   call mpp_clock_begin(regenClock)
 
-  call mpp_get_compute_domain(Ice%Domain, isc, iec, jsc, jec)
+  if (do_transform_on_this_pe()) then
+    call mpp_get_compute_domain(Ice%Domain_untrans, isc, iec, jsc, jec)
+    allocate(tmp(size(Ice%part_size, 2), size(Ice%part_size, 1), &
+                 size(Ice%part_size, 3)))
+    call undo_transform(Ice%part_size, tmp) 
+    call set_frac_area(tmp , 'OCN', xmap_sfc)
+    deallocate(tmp)
+  else
+    call mpp_get_compute_domain(Ice%Domain, isc, iec, jsc, jec)
+    call set_frac_area (Ice%part_size(isc:iec,jsc:jec,:) , 'OCN', xmap_sfc)
+  endif
 
-  call set_frac_area (Ice%part_size(isc:iec,jsc:jec,:) , 'OCN', xmap_sfc)
   call set_frac_area (Land%tile_size, 'LND', xmap_sfc)
   n_xgrid_sfc = max(xgrid_count(xmap_sfc),1)
   if(n_xgrid_sfc .GE. nblocks) then

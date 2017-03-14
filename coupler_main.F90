@@ -354,6 +354,7 @@ program coupler_main
   use ocean_model_mod,         only: ocean_model_end, ocean_public_type, ocean_state_type, ice_ocean_boundary_type
   use ocean_model_mod,         only: ocean_model_restart
   use ocean_model_mod,         only: ocean_public_type_chksum, ice_ocn_bnd_type_chksum
+  use MOM_transform_test,      only: do_transform_on_this_pe
 !
 ! flux_ calls translate information between model grids - see flux_exchange.f90
 !
@@ -1570,7 +1571,11 @@ contains
                            //trim(walldate)//' '//trim(walltime)
         endif
         call print_memuse_stats( 'ice_model_init' )
-        call data_override_init(Ice_domain_in = Ice%domain)
+        if (do_transform_on_this_pe()) then
+          call data_override_init(Ice_domain_in = Ice%domain_untrans)
+        else
+          call data_override_init(Ice_domain_in = Ice%domain)
+        endif
     end if
     if( Ocean%is_ocean_pe )then
         call mpp_set_current_pelist(Ocean%pelist)
