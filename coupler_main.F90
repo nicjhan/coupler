@@ -354,6 +354,7 @@ program coupler_main
   use ocean_model_mod,         only: ocean_model_end, ocean_public_type, ocean_state_type, ice_ocean_boundary_type
   use ocean_model_mod,         only: ocean_model_restart
   use ocean_model_mod,         only: ocean_public_type_chksum, ice_ocn_bnd_type_chksum
+  use MOM_transform_test,      only: do_transform_on_this_pe
 !
 ! flux_ calls translate information between model grids - see flux_exchange.f90
 !
@@ -513,6 +514,9 @@ program coupler_main
 
 !#######################################################################
 
+  do_debug=.True.
+  do_chksum=.True.
+
   call mpp_init()
 !these clocks are on the global pelist
   initClock = mpp_clock_id( 'Initialization' )
@@ -529,6 +533,7 @@ program coupler_main
   call mpp_clock_end (initClock) !end initialization
 
   call mpp_clock_begin(mainClock) !begin main loop
+
 
 !-----------------------------------------------------------------------
 !------ ocean/slow-ice integration loop ------
@@ -609,7 +614,9 @@ newClock14 = mpp_clock_id( 'final flux_check_stocks' )
      ! concurrent mode to avoid multiple synchronizations within the main loop.
      ! This is only possible in the serial case when use_lag_fluxes.
      call mpp_clock_begin(newClock2)
+     print*, 'BEFORE flux_ocean_to_ice'
      call flux_ocean_to_ice( Time, Ocean, Ice, Ocean_ice_boundary )
+     print*, 'AFTER flux_ocean_to_ice'
      call mpp_clock_end(newClock2)
      if(do_chksum) then
        call coupler_chksum('flux_ocn2ice+', nc)
@@ -1570,7 +1577,11 @@ contains
                            //trim(walldate)//' '//trim(walltime)
         endif
         call print_memuse_stats( 'ice_model_init' )
-        call data_override_init(Ice_domain_in = Ice%domain)
+        if (do_transform_on_this_pe()) then
+          call data_override_init(Ice_domain_in = Ice%domain_untrans)
+        else
+          call data_override_init(Ice_domain_in = Ice%domain)
+        endif
     end if
     if( Ocean%is_ocean_pe )then
         call mpp_set_current_pelist(Ocean%pelist)
@@ -1665,6 +1676,7 @@ contains
 !       read in extra fields for the air-sea gas fluxes
 !
 
+    print*, 'HERE A'
     if ( Ice%pe ) then
       call mpp_set_current_pelist(Ice%pelist)
       allocate(Ice_bc_restart(Ice%ocean_fluxes%num_bcs))
@@ -1697,6 +1709,7 @@ contains
         enddo  !} m
       enddo  !} n
     endif
+    print*, 'HERE B'
     if ( Ocean%is_ocean_pe ) then
       call mpp_set_current_pelist(Ocean%pelist)
       allocate(Ocn_bc_restart(Ocean%fields%num_bcs))
@@ -1729,6 +1742,7 @@ contains
         enddo  !} m
       enddo  !} n
     endif
+    print*, 'HERE C'
 
     call mpp_set_current_pelist()
 
