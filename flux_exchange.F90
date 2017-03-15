@@ -2640,6 +2640,8 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
   integer :: tr, n, m ! tracer indices
   integer :: is, ie, l, i
 
+  real, dimension(:, :, :), allocatable :: tmp
+
 !Balaji
   call mpp_clock_begin(cplClock)
   call mpp_clock_begin(fluxAtmDnClock)
@@ -3070,41 +3072,83 @@ subroutine flux_down_from_atmos (Time, Atm, Land, Ice, &
     enddo  !} m
   enddo  !} n
 
+#define ALLOCATE_TRANSFORMED_3D(A, B) allocate(A(size(B, 2), size(B, 1), size(B, 3)))
+
 !Balaji: data_override calls moved here from coupler_main
   call data_override('ICE', 'u_flux', Ice_boundary%u_flux,  Time)
   call data_override('ICE', 'v_flux', Ice_boundary%v_flux,  Time)
   call data_override('ICE', 't_flux', Ice_boundary%t_flux,  Time)
   call data_override('ICE', 'q_flux', Ice_boundary%q_flux,  Time)
   call data_override('ICE', 'lw_flux',Ice_boundary%lw_flux, Time)
+
   call data_override('ICE', 'lw_flux_dn',Ice_boundary%lw_flux, Time, override=ov)
-  ov = .false.
   if (ov) then
-    Ice_boundary%lw_flux = Ice_boundary%lw_flux - stefan*Ice%t_surf**4
+    if (do_transform_on_this_pe()) then
+      ALLOCATE_TRANSFORMED_3D(tmp, Ice%t_surf)
+      call transform(Ice%t_surf, tmp)
+      Ice_boundary%lw_flux = Ice_boundary%lw_flux - stefan*tmp**4
+      deallocate(tmp)
+    else
+      Ice_boundary%lw_flux = Ice_boundary%lw_flux - stefan*Ice%t_surf**4
+    endif
   endif
+
   call data_override('ICE', 'sw_flux_nir_dir',Ice_boundary%sw_flux_nir_dir, Time)
   call data_override('ICE', 'sw_flux_vis_dir',Ice_boundary%sw_flux_vis_dir, Time)
   call data_override('ICE', 'sw_flux_nir_dif',Ice_boundary%sw_flux_nir_dif, Time, override=ov)
   call data_override('ICE', 'sw_flux_vis_dif',Ice_boundary%sw_flux_vis_dif, Time)
+
   call data_override('ICE', 'sw_flux_vis_dir_dn',Ice_boundary%sw_flux_vis_dir, Time, override=ov)
-  ov = .false.
   if (ov) then
-    Ice_boundary%sw_flux_vis_dir = Ice_boundary%sw_flux_vis_dir*(1.0-Ice%albedo_vis_dir)
+    if (do_transform_on_this_pe()) then
+      ALLOCATE_TRANSFORMED_3D(tmp, Ice%albedo_vis_dir)
+      call transform(Ice%albedo_vis_dir, tmp)
+      Ice_boundary%sw_flux_vis_dir = Ice_boundary%sw_flux_vis_dir*(1.0-tmp)
+      deallocate(tmp)
+    else
+      Ice_boundary%sw_flux_vis_dir = Ice_boundary%sw_flux_vis_dir*(1.0-Ice%albedo_vis_dir)
+    endif
   endif
+
   call data_override('ICE', 'sw_flux_vis_dif_dn',Ice_boundary%sw_flux_vis_dif, Time, override=ov)
-  ov = .false.
   if (ov) then
-    Ice_boundary%sw_flux_vis_dif = Ice_boundary%sw_flux_vis_dif*(1.0-Ice%albedo_vis_dif)
+    if (do_transform_on_this_pe()) then
+      ALLOCATE_TRANSFORMED_3D(tmp, Ice%albedo_vis_dif)
+      call transform(Ice%albedo_vis_dif, tmp)
+      Ice_boundary%sw_flux_vis_dif = Ice_boundary%sw_flux_vis_dif*(1.0-tmp)
+      deallocate(tmp)
+    else
+      Ice_boundary%sw_flux_vis_dif = Ice_boundary%sw_flux_vis_dif*(1.0-Ice%albedo_vis_dif)
+    endif
   endif
+
   call data_override('ICE', 'sw_flux_nir_dir_dn',Ice_boundary%sw_flux_nir_dir, Time, override=ov)
-  ov = .false.
   if (ov) then
-    Ice_boundary%sw_flux_nir_dir = Ice_boundary%sw_flux_nir_dir*(1.0-Ice%albedo_nir_dir)
+    if (do_transform_on_this_pe()) then
+      ALLOCATE_TRANSFORMED_3D(tmp, Ice%albedo_nir_dir)
+      call transform(Ice%albedo_nir_dir, tmp)
+      Ice_boundary%sw_flux_nir_dir = Ice_boundary%sw_flux_nir_dir*(1.0-tmp)
+      deallocate(tmp)
+    else
+      Ice_boundary%sw_flux_nir_dir = Ice_boundary%sw_flux_nir_dir*(1.0-Ice%albedo_nir_dir)
+    endif
   endif
+
   call data_override('ICE', 'sw_flux_nir_dif_dn',Ice_boundary%sw_flux_nir_dif, Time, override=ov)
-  ov = .false.
   if (ov) then
-    Ice_boundary%sw_flux_nir_dif = Ice_boundary%sw_flux_nir_dif*(1.0-Ice%albedo_nir_dif)
+    if (do_transform_on_this_pe()) then
+      ALLOCATE_TRANSFORMED_3D(tmp, Ice%albedo_nir_dif)
+      call transform(Ice%albedo_nir_dif, tmp)
+      Ice_boundary%sw_flux_nir_dif = Ice_boundary%sw_flux_nir_dif*(1.0-tmp)
+      deallocate(tmp)
+    else
+      Ice_boundary%sw_flux_nir_dif = Ice_boundary%sw_flux_nir_dif*(1.0-Ice%albedo_nir_dif)
+    endif
   endif
+
+  print*, 'minval(Ice_boundary%sw_flux_nir_dir), maxval(Ice_boundary%sw_flux_nir_dir)', minval(Ice_boundary%sw_flux_nir_dir), maxval(Ice_boundary%sw_flux_nir_dir)
+  print*, 'Ice_boundary%sw_flux_nir_dir(10, 10, 2), Ice_boundary%sw_flux_nir_dir(10, 10, 2)', Ice_boundary%sw_flux_nir_dir(10, 10, 2), Ice_boundary%sw_flux_nir_dir(10, 10, 2)
+
   call data_override('ICE', 'lprec',  Ice_boundary%lprec,   Time)
   call data_override('ICE', 'fprec',  Ice_boundary%fprec,   Time)
   call data_override('ICE', 'dhdt',   Ice_boundary%dhdt,    Time)
